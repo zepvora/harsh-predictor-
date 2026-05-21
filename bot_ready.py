@@ -11,7 +11,7 @@ from telegram.ext import (
 # ============================================================
 import os
 BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8846798377:AAH8BKhwy6Z-GpFUDGBk_kCRnVwvSZJAiZw")
-BOT_USERNAME  = "predictor_bot"   # without @
+BOT_USERNAME  = "predictor_prediction_bot"   # without @
 
 ADMIN_IDS = [6896407205]
 
