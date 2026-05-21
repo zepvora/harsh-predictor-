@@ -54,6 +54,16 @@ def init_db():
             refer_count  INTEGER DEFAULT 0
         )
     """)
+    # Purani DB ke liye naye columns add karo (agar exist nahi karte)
+    for col, definition in [
+        ("credits",     "INTEGER DEFAULT 7"),
+        ("referred_by", "INTEGER DEFAULT NULL"),
+        ("refer_count", "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     conn.commit()
     conn.close()
 
