@@ -22,12 +22,12 @@ CHANNELS = [
     {"name": "💬 Discussions On Top", "username": "disscussionbfx",     "invite_link": None,                              "id": -1003999268364},
 ]
 
-DM_USERNAME       = "Predictorisdope"          # DM ke liye username
+DM_USERNAME       = "Predictorisdope"
 REGISTER_LINK     = "https://www.rajaparty5.com/#/register?invitationCode=365122527807"
 
-NEW_USER_CREDITS  = 7   # 5 base + 2 bonus
-REFER_CREDITS     = 4   # refer karne pe milte hain
-CREDITS_PER_PRED  = 1   # ek prediction = 1 credit
+NEW_USER_CREDITS  = 7
+REFER_CREDITS     = 4
+CREDITS_PER_PRED  = 1
 # ============================================================
 
 logging.basicConfig(
@@ -54,7 +54,6 @@ def init_db():
             refer_count  INTEGER DEFAULT 0
         )
     """)
-    # Purani DB ke liye naye columns add karo (agar exist nahi karte)
     for col, definition in [
         ("credits",     "INTEGER DEFAULT 7"),
         ("referred_by", "INTEGER DEFAULT NULL"),
@@ -63,7 +62,7 @@ def init_db():
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
     conn.commit()
     conn.close()
 
@@ -188,15 +187,15 @@ def predict_wingo(digits: str) -> dict:
 
     total = big_score + small_score
     if big_score > small_score:
-        result   = "BIG 🔴"
+        result     = "BIG 🔴"
         confidence = round((big_score / total) * 100)
-        color    = "🔴"
-        trend    = "📈"
+        color      = "🔴"
+        trend      = "📈"
     else:
-        result   = "SMALL 🟢"
+        result     = "SMALL 🟢"
         confidence = round((small_score / total) * 100)
-        color    = "🟢"
-        trend    = "📉"
+        color      = "🟢"
+        trend      = "📉"
 
     return {
         "error": False,
@@ -259,7 +258,6 @@ async def check_all_channels(user_id, bot):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
-    # Refer link check
     referred_by = None
     if context.args:
         try:
@@ -271,7 +269,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     is_new = save_user(user, referred_by)
 
-    # Referrer ko credit do (sirf naye user pe)
     if is_new and referred_by:
         increment_refer_count(referred_by)
         try:
@@ -314,6 +311,139 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="HTML",
                                         reply_markup=main_keyboard(credits))
 
+# ──────────────────────────────────────────────
+# ADMIN COMMANDS (proper CommandHandlers)
+# ──────────────────────────────────────────────
+async def addcredits_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Tum admin nahi ho!")
+        return
+
+    if len(context.args) == 2:
+        try:
+            target_id = int(context.args[0])
+            amount    = int(context.args[1])
+            add_credits(target_id, amount)
+
+            # Target user ko bhi notify karo
+            try:
+                udata = get_user(target_id)
+                new_credits = udata["credits"] if udata else amount
+                await context.bot.send_message(
+                    target_id,
+                    f"🎉 <b>Credits Mile!</b>\n\n"
+                    f"🎟️ Admin ne <b>{amount} credits</b> add kiye!\n"
+                    f"💰 Ab tumhare total credits: <b>{new_credits}</b>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass  # User ne bot block kiya hoga
+
+            await update.message.reply_text(
+                f"✅ <b>Done!</b>\n\n"
+                f"👤 User ID: <code>{target_id}</code>\n"
+                f"🎟️ Credits Added: <b>{amount}</b>",
+                parse_mode="HTML"
+            )
+        except ValueError:
+            await update.message.reply_text(
+                "❌ <b>Format galat hai!</b>\n\nSahi format:\n<code>/addcredits USER_ID AMOUNT</code>\n\nExample:\n<code>/addcredits 6896407205 10</code>",
+                parse_mode="HTML"
+            )
+    else:
+        await update.message.reply_text(
+            "❌ <b>Format galat hai!</b>\n\nSahi format:\n<code>/addcredits USER_ID AMOUNT</code>\n\nExample:\n<code>/addcredits 6896407205 10</code>",
+            parse_mode="HTML"
+        )
+
+async def removecredits_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Tum admin nahi ho!")
+        return
+
+    if len(context.args) == 2:
+        try:
+            target_id = int(context.args[0])
+            amount    = int(context.args[1])
+            conn = sqlite3.connect("bot_users.db")
+            c = conn.cursor()
+            c.execute("UPDATE users SET credits = MAX(0, credits - ?) WHERE user_id=?", (amount, target_id))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(
+                f"✅ <b>Done!</b>\n\n"
+                f"👤 User ID: <code>{target_id}</code>\n"
+                f"🎟️ Credits Removed: <b>{amount}</b>",
+                parse_mode="HTML"
+            )
+        except ValueError:
+            await update.message.reply_text("❌ Format: /removecredits USER_ID AMOUNT")
+    else:
+        await update.message.reply_text("❌ Format: /removecredits USER_ID AMOUNT")
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        return
+    total = get_total_users()
+    await update.message.reply_text(
+        f"📊 <b>Bot Stats</b>\n\n"
+        f"👥 Total Users: <b>{total}</b>",
+        parse_mode="HTML"
+    )
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        return
+    if not context.args:
+        await update.message.reply_text("❌ Format: /broadcast MESSAGE")
+        return
+    msg = " ".join(context.args)
+    users = get_all_users()
+    sent, failed = 0, 0
+    for uid in users:
+        try:
+            await context.bot.send_message(uid, msg, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            failed += 1
+    await update.message.reply_text(
+        f"📢 <b>Broadcast Done!</b>\n\n✅ Sent: {sent}\n❌ Failed: {failed}",
+        parse_mode="HTML"
+    )
+
+async def checkuser_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin: kisi bhi user ki info dekho"""
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        return
+    if len(context.args) == 1:
+        try:
+            target_id = int(context.args[0])
+            udata = get_user(target_id)
+            if udata:
+                await update.message.reply_text(
+                    f"👤 <b>User Info</b>\n\n"
+                    f"🆔 ID: <code>{udata['user_id']}</code>\n"
+                    f"📛 Name: {udata['first_name']}\n"
+                    f"🎟️ Credits: <b>{udata['credits']}</b>\n"
+                    f"👥 Refers: {udata['refer_count']}\n"
+                    f"✅ Verified: {'Yes' if udata['verified'] else 'No'}",
+                    parse_mode="HTML"
+                )
+            else:
+                await update.message.reply_text("❌ User nahi mila database mein!")
+        except ValueError:
+            await update.message.reply_text("❌ Format: /checkuser USER_ID")
+    else:
+        await update.message.reply_text("❌ Format: /checkuser USER_ID")
+
+# ──────────────────────────────────────────────
+# BUTTON HANDLER
+# ──────────────────────────────────────────────
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user  = query.from_user
@@ -326,7 +456,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     credits = udata["credits"] if udata else 0
 
-    # ── VERIFY ──
     if query.data == "verify":
         not_joined = await check_all_channels(user.id, context.bot)
         if not_joined:
@@ -353,7 +482,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=main_keyboard(credits)
             )
 
-    # ── PREDICT ──
     elif query.data == "predict":
         not_joined = await check_all_channels(user.id, context.bot)
         if not_joined:
@@ -392,7 +520,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-    # ── REFER ──
     elif query.data == "refer":
         refer_link = f"https://t.me/{BOT_USERNAME}?start={user.id}"
         refer_count = udata.get("refer_count", 0)
@@ -414,7 +541,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-    # ── HOW IT WORKS ──
     elif query.data == "howto":
         await query.edit_message_text(
             "📊 <b>Kaise Kaam Karta Hai?</b>\n\n"
@@ -441,7 +567,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-    # ── CHANNELS ──
     elif query.data == "channels":
         ch_lines = []
         for ch in CHANNELS:
@@ -459,7 +584,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-    # ── BACK ──
     elif query.data == "back_main":
         udata = get_user(user.id)
         credits = udata["credits"] if udata else 0
@@ -473,51 +597,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=main_keyboard(credits)
         )
 
+# ──────────────────────────────────────────────
+# MESSAGE HANDLER
+# ──────────────────────────────────────────────
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
 
-    # Admin commands
-    if user.id in ADMIN_IDS:
-        if text.startswith("/broadcast "):
-            msg = text[len("/broadcast "):]
-            users = get_all_users()
-            sent, failed = 0, 0
-            for uid in users:
-                try:
-                    await context.bot.send_message(uid, msg, parse_mode="HTML")
-                    sent += 1
-                except Exception:
-                    failed += 1
-            await update.message.reply_text(
-                f"📢 Broadcast done!\n✅ Sent: {sent}\n❌ Failed: {failed}"
-            )
-            return
-
-        if text == "/stats":
-            total = get_total_users()
-            await update.message.reply_text(
-                f"📊 <b>Bot Stats</b>\n\n👥 Total Users: <b>{total}</b>",
-                parse_mode="HTML"
-            )
-            return
-
-        if text.startswith("/addcredits "):
-            # /addcredits USER_ID AMOUNT
-            parts = text.split()
-            if len(parts) == 3:
-                try:
-                    target_id = int(parts[1])
-                    amount    = int(parts[2])
-                    add_credits(target_id, amount)
-                    await update.message.reply_text(
-                        f"✅ {amount} credits add kiye user {target_id} ko!"
-                    )
-                except ValueError:
-                    await update.message.reply_text("❌ Format: /addcredits USER_ID AMOUNT")
-            return
-
-    # Prediction flow
     if context.user_data.get("waiting_for_digits"):
         not_joined = await check_all_channels(user.id, context.bot)
         if not_joined:
@@ -549,7 +635,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Deduct 1 credit
         success = deduct_credit(user.id)
         context.user_data["waiting_for_digits"] = False
 
@@ -560,7 +645,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bar_filled = int(conf / 10)
         bar        = "█" * bar_filled + "░" * (10 - bar_filled)
 
-        # Confidence level label
         if conf >= 70:
             conf_label = "🔥 HIGH"
         elif conf >= 55:
@@ -627,11 +711,21 @@ def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Start
     app.add_handler(CommandHandler("start", start))
+
+    # ✅ Admin Commands (properly registered)
+    app.add_handler(CommandHandler("addcredits", addcredits_command))
+    app.add_handler(CommandHandler("removecredits", removecredits_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("checkuser", checkuser_command))
+
+    # Buttons & Messages
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    logger.info("✅ Advanced Bot started!")
+    logger.info("✅ Bot started!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
