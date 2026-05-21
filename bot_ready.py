@@ -448,6 +448,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user  = query.from_user
     await query.answer()
+    # Sirf private chat mein kaam karo
+    if query.message.chat.type != "private":
+        return
 
     udata = get_user(user.id)
     if not udata:
@@ -603,6 +606,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
+    # Sirf private chat mein kaam karo
+    if update.message.chat.type != "private":
+        return
 
     if context.user_data.get("waiting_for_digits"):
         not_joined = await check_all_channels(user.id, context.bot)
