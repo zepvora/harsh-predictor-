@@ -1,5 +1,4 @@
 import logging
-import os
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -10,7 +9,8 @@ from telegram.ext import (
 # ============================================================
 #  ⚙️  CONFIG - YAHAN APNI VALUES BHARO
 # ============================================================
-BOT_TOKEN = "8846798377:AAH8BKhwy6Z-GpFUDGBk_kCRnVwvSZJAiZw"           # @BotFather se lo
+import os
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8846798377:AAH8BKhwy6Z-GpFUDGBk_kCRnVwvSZJAiZw")
 BOT_USERNAME = "predictor_bot"          # without @
 
 ADMIN_IDS = [6896407205]                     # Tera Telegram User ID
