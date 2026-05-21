@@ -7,21 +7,27 @@ from telegram.ext import (
 )
 
 # ============================================================
-#  ⚙️  CONFIG - YAHAN APNI VALUES BHARO
+#  ⚙️  CONFIG
 # ============================================================
 import os
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8846798377:AAH8BKhwy6Z-GpFUDGBk_kCRnVwvSZJAiZw")
-BOT_USERNAME = "predictor_bot"          # without @
+BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8846798377:AAH8BKhwy6Z-GpFUDGBk_kCRnVwvSZJAiZw")
+BOT_USERNAME  = "predictor_bot"   # without @
 
-ADMIN_IDS = [6896407205]                     # Tera Telegram User ID
+ADMIN_IDS = [6896407205]
 
-# 4+ Channels jo join karwane hain (username without @)
 CHANNELS = [
     {"name": "🔥 Main Channel",       "username": None,                 "invite_link": "https://t.me/+geNHq7jKIiAyYjJl", "id": -1001813666985},
     {"name": "📈 Trade With Sniper",  "username": "snipertradingshort", "invite_link": None,                              "id": -1003750001776},
     {"name": "💎 Premium Group",      "username": None,                 "invite_link": "https://t.me/+i1aDUi_W8bE3ZTVl",  "id": -1003765229156},
     {"name": "💬 Discussions On Top", "username": "disscussionbfx",     "invite_link": None,                              "id": -1003999268364},
 ]
+
+DM_USERNAME       = "Predictorisdope"          # DM ke liye username
+REGISTER_LINK     = "https://www.rajaparty5.com/#/register?invitationCode=365122527807"
+
+NEW_USER_CREDITS  = 7   # 5 base + 2 bonus
+REFER_CREDITS     = 4   # refer karne pe milte hain
+CREDITS_PER_PRED  = 1   # ek prediction = 1 credit
 # ============================================================
 
 logging.basicConfig(
@@ -38,30 +44,75 @@ def init_db():
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id     INTEGER PRIMARY KEY,
-            username    TEXT,
-            first_name  TEXT,
-            joined_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            verified    INTEGER DEFAULT 0
+            user_id      INTEGER PRIMARY KEY,
+            username     TEXT,
+            first_name   TEXT,
+            joined_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            verified     INTEGER DEFAULT 0,
+            credits      INTEGER DEFAULT 0,
+            referred_by  INTEGER DEFAULT NULL,
+            refer_count  INTEGER DEFAULT 0
         )
     """)
     conn.commit()
     conn.close()
 
-def save_user(user):
+def save_user(user, referred_by=None):
     conn = sqlite3.connect("bot_users.db")
     c = conn.cursor()
-    c.execute("""
-        INSERT OR IGNORE INTO users (user_id, username, first_name)
-        VALUES (?, ?, ?)
-    """, (user.id, user.username, user.first_name))
-    conn.commit()
+    c.execute("SELECT user_id FROM users WHERE user_id=?", (user.id,))
+    exists = c.fetchone()
+    if not exists:
+        c.execute("""
+            INSERT INTO users (user_id, username, first_name, credits, referred_by)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user.id, user.username, user.first_name, NEW_USER_CREDITS, referred_by))
+        conn.commit()
+        is_new = True
+    else:
+        is_new = False
     conn.close()
+    return is_new
 
-def set_verified(user_id: int):
+def set_verified(user_id):
     conn = sqlite3.connect("bot_users.db")
     c = conn.cursor()
     c.execute("UPDATE users SET verified=1 WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def get_user(user_id):
+    conn = sqlite3.connect("bot_users.db")
+    c = conn.cursor()
+    c.execute("SELECT user_id, username, first_name, verified, credits, referred_by, refer_count FROM users WHERE user_id=?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {"user_id": row[0], "username": row[1], "first_name": row[2],
+                "verified": row[3], "credits": row[4], "referred_by": row[5], "refer_count": row[6]}
+    return None
+
+def deduct_credit(user_id):
+    conn = sqlite3.connect("bot_users.db")
+    c = conn.cursor()
+    c.execute("UPDATE users SET credits = credits - 1 WHERE user_id=? AND credits > 0", (user_id,))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+def add_credits(user_id, amount):
+    conn = sqlite3.connect("bot_users.db")
+    c = conn.cursor()
+    c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (amount, user_id))
+    conn.commit()
+    conn.close()
+
+def increment_refer_count(referrer_id):
+    conn = sqlite3.connect("bot_users.db")
+    c = conn.cursor()
+    c.execute("UPDATE users SET refer_count = refer_count + 1, credits = credits + ? WHERE user_id=?",
+              (REFER_CREDITS, referrer_id))
     conn.commit()
     conn.close()
 
@@ -82,13 +133,9 @@ def get_all_users():
     return [r[0] for r in rows]
 
 # ──────────────────────────────────────────────
-# PREDICTION ALGORITHM (Wingo 30 Logic)
+# PREDICTION ALGORITHM
 # ──────────────────────────────────────────────
 def predict_wingo(digits: str) -> dict:
-    """
-    3 digits enter karo → Big/Small predict karta hai
-    Multiple factors use karta hai accurate feel ke liye
-    """
     if len(digits) != 3 or not digits.isdigit():
         return {"error": True}
 
@@ -96,15 +143,12 @@ def predict_wingo(digits: str) -> dict:
     num = int(digits)
 
     digit_sum   = sum(d)
-    digit_prod  = d[0] * d[1] * d[2] if all(x > 0 for x in d) else 0
     digit_range = max(d) - min(d)
     even_count  = sum(1 for x in d if x % 2 == 0)
 
-    # Scoring system
     big_score = 0
     small_score = 0
 
-    # Factor 1: digit sum
     if digit_sum >= 13:
         big_score += 2
     elif digit_sum <= 11:
@@ -112,25 +156,21 @@ def predict_wingo(digits: str) -> dict:
     else:
         big_score += 1
 
-    # Factor 2: modulo pattern (original algo)
     if num % 3 == 0 or num % 7 == 0:
         big_score += 2
     else:
         small_score += 2
 
-    # Factor 3: even/odd digits
     if even_count >= 2:
         big_score += 1
     else:
         small_score += 1
 
-    # Factor 4: range
     if digit_range >= 5:
         big_score += 1
     else:
         small_score += 1
 
-    # Factor 5: last digit
     if d[2] >= 5:
         big_score += 1
     else:
@@ -138,29 +178,61 @@ def predict_wingo(digits: str) -> dict:
 
     total = big_score + small_score
     if big_score > small_score:
-        result = "BIG 🔴"
+        result   = "BIG 🔴"
         confidence = round((big_score / total) * 100)
-        color = "🔴"
+        color    = "🔴"
+        trend    = "📈"
     else:
-        result = "SMALL 🟢"
+        result   = "SMALL 🟢"
         confidence = round((small_score / total) * 100)
-        color = "🟢"
+        color    = "🟢"
+        trend    = "📉"
 
     return {
         "error": False,
         "result": result,
         "confidence": confidence,
         "color": color,
+        "trend": trend,
         "digit_sum": digit_sum,
         "big_score": big_score,
         "small_score": small_score,
     }
 
 # ──────────────────────────────────────────────
-# CHANNEL VERIFICATION
+# KEYBOARDS
 # ──────────────────────────────────────────────
-async def check_all_channels(user_id: int, bot) -> list:
-    """Returns list of channels user hasn't joined"""
+def join_channels_keyboard():
+    buttons = []
+    for ch in CHANNELS:
+        link = ch["invite_link"] if ch.get("invite_link") else f"https://t.me/{ch['username']}"
+        buttons.append([InlineKeyboardButton(f"📢 {ch['name']}", url=link)])
+    buttons.append([InlineKeyboardButton("✅ Verify Karo", callback_data="verify")])
+    return InlineKeyboardMarkup(buttons)
+
+def main_keyboard(credits=0):
+    credit_label = f"🎯 Get Prediction  [{credits} 🎟️]"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(credit_label, callback_data="predict")],
+        [InlineKeyboardButton("🔗 Refer & Earn Credits", callback_data="refer")],
+        [InlineKeyboardButton("📊 How it works", callback_data="howto"),
+         InlineKeyboardButton("👥 Channels", callback_data="channels")],
+        [InlineKeyboardButton("💬 DM Admin", url=f"https://t.me/{DM_USERNAME}"),
+         InlineKeyboardButton("🎰 Register Now", url=REGISTER_LINK)],
+    ])
+
+def no_credits_keyboard(refer_link):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Refer & Earn 4 Credits", url=refer_link)],
+        [InlineKeyboardButton("💬 DM Admin", url=f"https://t.me/{DM_USERNAME}")],
+        [InlineKeyboardButton("🎰 Register & Earn", url=REGISTER_LINK)],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")],
+    ])
+
+# ──────────────────────────────────────────────
+# CHANNEL CHECK
+# ──────────────────────────────────────────────
+async def check_all_channels(user_id, bot):
     not_joined = []
     for ch in CHANNELS:
         try:
@@ -171,32 +243,37 @@ async def check_all_channels(user_id: int, bot) -> list:
             not_joined.append(ch)
     return not_joined
 
-def join_channels_keyboard():
-    """Keyboard with channel join buttons + verify button"""
-    buttons = []
-    for ch in CHANNELS:
-        if ch.get("invite_link"):
-            link = ch["invite_link"]
-        else:
-            link = f"https://t.me/{ch['username']}"
-        buttons.append([InlineKeyboardButton(f"📢 {ch['name']}", url=link)])
-    buttons.append([InlineKeyboardButton("✅ Verify Now", callback_data="verify")])
-    return InlineKeyboardMarkup(buttons)
-
-def main_keyboard():
-    """Main menu keyboard after verification"""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎯 Get Prediction", callback_data="predict")],
-        [InlineKeyboardButton("📊 How it works", callback_data="howto")],
-        [InlineKeyboardButton("👥 Our Channels", callback_data="channels")],
-    ])
-
 # ──────────────────────────────────────────────
 # HANDLERS
 # ──────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    save_user(user)
+
+    # Refer link check
+    referred_by = None
+    if context.args:
+        try:
+            ref_id = int(context.args[0])
+            if ref_id != user.id:
+                referred_by = ref_id
+        except ValueError:
+            pass
+
+    is_new = save_user(user, referred_by)
+
+    # Referrer ko credit do (sirf naye user pe)
+    if is_new and referred_by:
+        increment_refer_count(referred_by)
+        try:
+            await context.bot.send_message(
+                referred_by,
+                f"🎉 <b>+{REFER_CREDITS} Credits Mile!</b>\n\n"
+                f"✅ <b>{user.first_name}</b> ne tumhara refer link use kiya!\n"
+                f"🎟️ Tumhare account mein <b>{REFER_CREDITS} credits</b> add ho gaye!",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
 
     not_joined = await check_all_channels(user.id, context.bot)
 
@@ -204,33 +281,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"👋 Welcome <b>{user.first_name}</b>!\n\n"
             "🔒 <b>Bot Access Locked</b>\n\n"
-            "Humara bot use karne ke liye pehle <b>sabhi channels join karne honge</b>:\n\n"
-            "⬇️ Neeche diye channels join karo phir\n"
-            "<b>✅ Verify Now</b> button dabao!"
+            "Sabhi channels join karo, phir\n"
+            "<b>✅ Verify Karo</b> button dabao!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎟️ Join karne ke baad milenge: <b>{NEW_USER_CREDITS} Free Credits!</b>\n"
+            f"   (5 Base + 2 Bonus 🎁)"
         )
-        await update.message.reply_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=join_channels_keyboard()
-        )
+        await update.message.reply_text(text, parse_mode="HTML",
+                                        reply_markup=join_channels_keyboard())
     else:
         set_verified(user.id)
+        udata = get_user(user.id)
+        credits = udata["credits"] if udata else NEW_USER_CREDITS
         text = (
-            f"✅ <b>Welcome back {user.first_name}!</b>\n\n"
-            "🎯 <b>Wingo 30 Big/Small Predictor</b>\n\n"
-            "3 digits enter karo aur prediction lo!\n\n"
+            f"✅ <b>Welcome {user.first_name}!</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 <b>Wingo 30 Big/Small Predictor</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🎟️ Tumhare Credits: <b>{credits}</b>\n\n"
             "👇 <b>Get Prediction</b> dabao:"
         )
-        await update.message.reply_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=main_keyboard()
-        )
+        await update.message.reply_text(text, parse_mode="HTML",
+                                        reply_markup=main_keyboard(credits))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user = query.from_user
+    user  = query.from_user
     await query.answer()
+
+    udata = get_user(user.id)
+    if not udata:
+        save_user(user)
+        udata = get_user(user.id)
+
+    credits = udata["credits"] if udata else 0
 
     # ── VERIFY ──
     if query.data == "verify":
@@ -239,18 +323,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             names = "\n".join([f"❌ {ch['name']}" for ch in not_joined])
             await query.edit_message_text(
                 f"⚠️ <b>Abhi bhi join nahi kiya:</b>\n\n{names}\n\n"
-                "Upar diye sabhi channels join karo phir verify karo! 👆",
+                "Sabhi channels join karo phir verify karo! 👆",
                 parse_mode="HTML",
                 reply_markup=join_channels_keyboard()
             )
         else:
             set_verified(user.id)
+            udata = get_user(user.id)
+            credits = udata["credits"]
             await query.edit_message_text(
-                f"🎉 <b>Verified Successfully {user.first_name}!</b>\n\n"
-                "Ab tum bot use kar sakte ho!\n\n"
+                f"🎉 <b>Verified! Welcome {user.first_name}!</b>\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎟️ Tumhare Credits: <b>{credits}</b>\n"
+                f"   (5 Base + 2 Bonus 🎁)\n\n"
+                "Ek prediction = 1 credit\n"
+                "Refer karo = 4 credits kamao! 🔗\n\n"
                 "👇 Prediction lene ke liye button dabao:",
                 parse_mode="HTML",
-                reply_markup=main_keyboard()
+                reply_markup=main_keyboard(credits)
             )
 
     # ── PREDICT ──
@@ -263,29 +353,77 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=join_channels_keyboard()
             )
             return
+
+        if credits <= 0:
+            refer_link = f"https://t.me/{BOT_USERNAME}?start={user.id}"
+            await query.edit_message_text(
+                "😢 <b>Credits Khatam Ho Gaye!</b>\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "🎟️ Credits pane ke 2 tarike:\n\n"
+                f"🔗 <b>Refer karo</b> → +{REFER_CREDITS} credits per refer\n"
+                f"🎰 <b>Register karo</b> → Bonus earn karo\n\n"
+                f"📎 Tera Refer Link:\n<code>{refer_link}</code>\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "💬 Ya Admin se contact karo:",
+                parse_mode="HTML",
+                reply_markup=no_credits_keyboard(refer_link)
+            )
+            return
+
         context.user_data["waiting_for_digits"] = True
         await query.edit_message_text(
             "🎯 <b>Wingo 30 Predictor</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎟️ Credits: <b>{credits}</b> (1 credit use hoga)\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
             "📝 <b>Last 3 digits enter karo:</b>\n\n"
             "Example: <code>456</code> ya <code>789</code>\n\n"
             "⬇️ Neeche type karo:",
             parse_mode="HTML"
         )
 
+    # ── REFER ──
+    elif query.data == "refer":
+        refer_link = f"https://t.me/{BOT_USERNAME}?start={user.id}"
+        refer_count = udata.get("refer_count", 0)
+        await query.edit_message_text(
+            "🔗 <b>Refer & Earn System</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ Har successful refer pe: <b>+{REFER_CREDITS} Credits</b>\n"
+            f"👥 Tumhare total refers: <b>{refer_count}</b>\n"
+            f"🎟️ Tumhare credits: <b>{credits}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📎 <b>Tera Unique Refer Link:</b>\n"
+            f"<code>{refer_link}</code>\n\n"
+            "👆 Copy karo aur dosto ko bhejo!\n"
+            "Jab woh join karenge, tumhe automatic credit milega! 🎉",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={refer_link}&text=🎯+Wingo+30+Predictor+Bot+-+Free+Predictions!")],
+                [InlineKeyboardButton("🏠 Back", callback_data="back_main")],
+            ])
+        )
+
     # ── HOW IT WORKS ──
     elif query.data == "howto":
         await query.edit_message_text(
-            "📊 <b>Kaise kaam karta hai?</b>\n\n"
+            "📊 <b>Kaise Kaam Karta Hai?</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
             "1️⃣ Wingo 30 ka last result dekho\n"
             "2️⃣ Last 3 digits copy karo\n"
-            "3️⃣ Bot mein enter karo\n"
-            "4️⃣ Algorithm analyze karta hai:\n\n"
-            "   • Digit Sum Pattern\n"
-            "   • Modulo Analysis (÷3, ÷7)\n"
-            "   • Even/Odd Distribution\n"
-            "   • Range Calculation\n"
-            "   • Last Digit Weight\n\n"
-            "5️⃣ BIG 🔴 ya SMALL 🟢 predict hota hai\n\n"
+            "3️⃣ Bot mein enter karo\n\n"
+            "🧠 <b>Algorithm Factors:</b>\n"
+            "  • Digit Sum Pattern\n"
+            "  • Modulo Analysis (÷3, ÷7)\n"
+            "  • Even/Odd Distribution\n"
+            "  • Range Calculation\n"
+            "  • Last Digit Weight\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🎟️ <b>Credit System:</b>\n"
+            f"  • New user: {NEW_USER_CREDITS} free credits\n"
+            f"  • Refer karo: +{REFER_CREDITS} credits\n"
+            "  • 1 prediction = 1 credit\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
             "⚠️ <i>Sirf entertainment ke liye hai</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -293,18 +431,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-    # ── CHANNELS LIST ──
+    # ── CHANNELS ──
     elif query.data == "channels":
         ch_lines = []
         for ch in CHANNELS:
             if ch.get("username"):
-                ch_lines.append(f"📢 @{ch['username']} — {ch['name']}")
+                ch_lines.append(f"📢 @{ch['username']}")
             else:
                 ch_lines.append(f"🔒 {ch['name']} (Private)")
         ch_list = "\n".join(ch_lines)
         await query.edit_message_text(
             f"📢 <b>Humare Channels:</b>\n\n{ch_list}\n\n"
-            "Join karo latest predictions ke liye!",
+            "Join karo latest predictions ke liye! 🔥",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
@@ -313,12 +451,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── BACK ──
     elif query.data == "back_main":
+        udata = get_user(user.id)
+        credits = udata["credits"] if udata else 0
         await query.edit_message_text(
-            "🎯 <b>Wingo 30 Big/Small Predictor</b>\n\n"
-            "3 digits enter karo aur prediction lo!\n\n"
+            "🤖 <b>Wingo 30 Big/Small Predictor</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎟️ Tumhare Credits: <b>{credits}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
             "👇 <b>Get Prediction</b> dabao:",
             parse_mode="HTML",
-            reply_markup=main_keyboard()
+            reply_markup=main_keyboard(credits)
         )
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -350,15 +492,40 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        if text.startswith("/addcredits "):
+            # /addcredits USER_ID AMOUNT
+            parts = text.split()
+            if len(parts) == 3:
+                try:
+                    target_id = int(parts[1])
+                    amount    = int(parts[2])
+                    add_credits(target_id, amount)
+                    await update.message.reply_text(
+                        f"✅ {amount} credits add kiye user {target_id} ko!"
+                    )
+                except ValueError:
+                    await update.message.reply_text("❌ Format: /addcredits USER_ID AMOUNT")
+            return
+
     # Prediction flow
     if context.user_data.get("waiting_for_digits"):
-        # Verify channels first
         not_joined = await check_all_channels(user.id, context.bot)
         if not_joined:
             context.user_data["waiting_for_digits"] = False
             await update.message.reply_text(
                 "🔒 Pehle sabhi channels join karo!",
                 reply_markup=join_channels_keyboard()
+            )
+            return
+
+        udata = get_user(user.id)
+        if not udata or udata["credits"] <= 0:
+            context.user_data["waiting_for_digits"] = False
+            refer_link = f"https://t.me/{BOT_USERNAME}?start={user.id}"
+            await update.message.reply_text(
+                "😢 <b>Credits Khatam!</b>\n\nRefer karo ya register karo credits pane ke liye:",
+                parse_mode="HTML",
+                reply_markup=no_credits_keyboard(refer_link)
             )
             return
 
@@ -372,37 +539,62 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # Deduct 1 credit
+        success = deduct_credit(user.id)
         context.user_data["waiting_for_digits"] = False
 
-        conf = result["confidence"]
+        udata = get_user(user.id)
+        remaining = udata["credits"] if udata else 0
+
+        conf       = result["confidence"]
         bar_filled = int(conf / 10)
-        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        bar        = "█" * bar_filled + "░" * (10 - bar_filled)
+
+        # Confidence level label
+        if conf >= 70:
+            conf_label = "🔥 HIGH"
+        elif conf >= 55:
+            conf_label = "⚡ MEDIUM"
+        else:
+            conf_label = "⚠️ LOW"
 
         response = (
-            f"🎯 <b>WINGO 30 PREDICTION</b>\n"
-            f"{'─' * 28}\n\n"
-            f"📥 Input: <code>{digits}</code>\n\n"
-            f"🔮 <b>Result: {result['result']}</b>\n\n"
-            f"📊 Confidence: <b>{conf}%</b>\n"
-            f"[{bar}]\n\n"
-            f"📈 Analysis:\n"
-            f"  • Digit Sum: <b>{result['digit_sum']}</b>\n"
-            f"  • BIG Score: <b>{result['big_score']}/8</b>\n"
-            f"  • SMALL Score: <b>{result['small_score']}/8</b>\n\n"
-            f"{'─' * 28}\n"
-            f"⚠️ <i>Sirf entertainment ke liye</i>"
+            "╔══════════════════════╗\n"
+            "  🤖 <b>WINGO 30 PREDICTION</b>\n"
+            "╚══════════════════════╝\n\n"
+            f"📥 <b>Input:</b> <code>{digits}</code>\n\n"
+            f"{result['color']} <b>Result: {result['result']}</b>\n\n"
+            f"📊 <b>Confidence:</b> {conf}% {conf_label}\n"
+            f"<code>[{bar}]</code>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📈 <b>Analysis:</b>\n"
+            f"  {result['trend']} Digit Sum: <b>{result['digit_sum']}</b>\n"
+            f"  🔴 BIG Score:   <b>{result['big_score']}/8</b>\n"
+            f"  🟢 SMALL Score: <b>{result['small_score']}/8</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"🎟️ Baaki Credits: <b>{remaining}</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>Sirf entertainment ke liye</i>"
         )
+
+        kb_buttons = [
+            [InlineKeyboardButton("🔄 Predict Again", callback_data="predict")],
+        ]
+        if remaining <= 1:
+            refer_link = f"https://t.me/{BOT_USERNAME}?start={user.id}"
+            kb_buttons.append([InlineKeyboardButton("🔗 Refer & Earn Credits", url=refer_link)])
+        kb_buttons.append([
+            InlineKeyboardButton("💬 DM Admin", url=f"https://t.me/{DM_USERNAME}"),
+            InlineKeyboardButton("🎰 Register", url=REGISTER_LINK)
+        ])
+        kb_buttons.append([InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")])
 
         await update.message.reply_text(
             response,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Predict Again", callback_data="predict")],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")],
-            ])
+            reply_markup=InlineKeyboardMarkup(kb_buttons)
         )
     else:
-        # Unknown message → show menu
         not_joined = await check_all_channels(user.id, context.bot)
         if not_joined:
             await update.message.reply_text(
@@ -410,9 +602,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=join_channels_keyboard()
             )
         else:
+            udata = get_user(user.id)
+            credits = udata["credits"] if udata else 0
             await update.message.reply_text(
-                "👇 Menu use karo:",
-                reply_markup=main_keyboard()
+                f"🎟️ Tumhare Credits: <b>{credits}</b>\n\n👇 Menu use karo:",
+                parse_mode="HTML",
+                reply_markup=main_keyboard(credits)
             )
 
 # ──────────────────────────────────────────────
@@ -426,7 +621,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    logger.info("✅ Bot started!")
+    logger.info("✅ Advanced Bot started!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
