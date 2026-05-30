@@ -23,7 +23,7 @@ CHANNELS = [
 ]
 
 DM_USERNAME      = "Predictorisdope"
-REGISTER_LINK    = "https://www.rajaparty5.com/#/register?invitationCode=365122527807"
+REGISTER_LINK    = "https://dhani11.com/register?inviteCode=A7SSMNW&from=web"
 NEW_USER_CREDITS = 7
 REFER_CREDITS    = 4
 # ============================================================
