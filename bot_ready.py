@@ -13,7 +13,7 @@ from telegram.ext import (
 BOT_TOKEN    = os.environ.get("BOT_TOKEN", "8846798377:AAEa4_4nVK14XmvmfOD0zd6UbSlRhzPKPS0")
 BOT_USERNAME = "predictor_prediction_bot"
 
-ADMIN_IDS = [6896407205]
+ADMIN_IDS = [6499436331]
 
 CHANNELS = [
     {"name": "🔥 Main Channel",       "username": None,                 "invite_link": "https://t.me/+geNHq7jKIiAyYjJl", "id": -1001813666985},
