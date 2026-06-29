@@ -15,18 +15,10 @@ BOT_USERNAME = "predictor_prediction_bot"
 
 ADMIN_IDS = [6499436331]
 
-CHANNELS = [
-    {"name": "🔥 Main Channel",       "username": None,                 "invite_link": "https://t.me/+geNHq7jKIiAyYjJl", "id": -1001813666985},
-    {"name": "📈 Trade With Sniper",  "username": "snipertradingshort", "invite_link": None,                              "id": -1003750001776},
-    {"name": "💎 Premium Group",      "username": None,                 "invite_link": "https://t.me/+i1aDUi_W8bE3ZTVl",  "id": -1003765229156},
-    {"name": "💬 Discussions On Top", "username": "disscussionbfx",     "invite_link": None,                              "id": -1003999268364},
-]
-
 DM_USERNAME      = "Predictorisdope"
 REGISTER_LINK    = "https://dhani11.com/register?inviteCode=A7SSMNW&from=web"
 NEW_USER_CREDITS = 7
 REFER_CREDITS    = 4
-
 MANAGER_USERNAME = "ManagerHarsh"
 # ============================================================
 
@@ -34,34 +26,34 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────
-# CLOSED MESSAGE (sent to every user always)
+# CLOSED MESSAGE
 # ──────────────────────────────────────────────
 CLOSED_TEXT = (
     "🚫🚫🚫🚫🚫🚫🚫🚫🚫🚫\n"
-    "        <b>BOT PERMANENTLY CLOSED</b>\n"
+    "  ⛔️  <b>BOT PERMANENTLY CLOSED</b>  ⛔️\n"
     "🚫🚫🚫🚫🚫🚫🚫🚫🚫🚫\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━\n"
     "🔴  <b>यह बॉट अब बंद हो चुका है।</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "👑 <b>Closed By:</b>  <code>@ManagerHarsh</code>\n\n"
-    "📅 <b>Status:</b>  ❌ Permanently Terminated\n"
-    "⚠️ <b>All services have been stopped.</b>\n\n"
+    "👑  <b>Closed By :</b>  <code>@ManagerHarsh</code>\n\n"
+    "📅  <b>Status :</b>  ❌  Permanently Terminated\n"
+    "⚠️  <b>All services have been stopped.</b>\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━\n"
-    "🔕  No predictions.\n"
-    "🔕  No credits.\n"
-    "🔕  No referrals.\n"
-    "🔕  No support.\n"
+    "🔕  No Predictions\n"
+    "🔕  No Credits\n"
+    "🔕  No Referrals\n"
+    "🔕  No Support\n"
     "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "⛔️ <i>Koi bhi command ya message kaam nahi karega.</i>\n\n"
+    "⛔️  <i>Koi bhi command ya message kaam nahi karega.</i>\n\n"
     "🚫🚫🚫🚫🚫🚫🚫🚫🚫🚫"
 )
 
 CLOSED_KEYBOARD = InlineKeyboardMarkup([
-    [InlineKeyboardButton("👑 @ManagerHarsh", url=f"https://t.me/ManagerHarsh")],
+    [InlineKeyboardButton("👑 @ManagerHarsh", url="https://t.me/ManagerHarsh")],
 ])
 
 # ──────────────────────────────────────────────
-# DATABASE  (kept intact for admin reference)
+# DATABASE  (kept for admin /stats reference)
 # ──────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect("bot_users.db")
@@ -81,34 +73,23 @@ def init_db():
             predictions_count INTEGER DEFAULT 0
         )
     """)
-    for col, defn in [
-        ("last_active",       "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
-        ("banned",            "INTEGER DEFAULT 0"),
-        ("credits",           "INTEGER DEFAULT 7"),
-        ("referred_by",       "INTEGER DEFAULT NULL"),
-        ("refer_count",       "INTEGER DEFAULT 0"),
-        ("predictions_count", "INTEGER DEFAULT 0"),
-    ]:
-        try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
-        except Exception:
-            pass
     conn.commit()
     conn.close()
 
-def save_user(user, referred_by=None):
+def save_user(user):
     conn = sqlite3.connect("bot_users.db")
     c = conn.cursor()
     c.execute("SELECT user_id FROM users WHERE user_id=?", (user.id,))
-    exists = c.fetchone()
-    if not exists:
-        c.execute("""
-            INSERT INTO users (user_id, username, first_name, credits, referred_by)
-            VALUES (?, ?, ?, ?, ?)
-        """, (user.id, user.username, user.first_name, NEW_USER_CREDITS, referred_by))
+    if not c.fetchone():
+        c.execute(
+            "INSERT INTO users (user_id, username, first_name) VALUES (?, ?, ?)",
+            (user.id, user.username, user.first_name)
+        )
     else:
-        c.execute("UPDATE users SET username=?, first_name=?, last_active=CURRENT_TIMESTAMP WHERE user_id=?",
-                  (user.username, user.first_name, user.id))
+        c.execute(
+            "UPDATE users SET username=?, first_name=?, last_active=CURRENT_TIMESTAMP WHERE user_id=?",
+            (user.username, user.first_name, user.id)
+        )
     conn.commit()
     conn.close()
 
@@ -135,21 +116,47 @@ def get_today_stats():
     return active_today, joined_today, total_preds, banned_count
 
 # ──────────────────────────────────────────────
-# ALL HANDLERS → show closed message
+# CORE: send closed message (works for all cases)
 # ──────────────────────────────────────────────
-async def closed_reply_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends permanent closure message to any user action."""
+async def send_closed(update: Update):
+    """Universal closed message — handles both message and callback contexts."""
+    if update.message:
+        await update.message.reply_text(
+            CLOSED_TEXT,
+            parse_mode="HTML",
+            reply_markup=CLOSED_KEYBOARD
+        )
+    elif update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(
+                CLOSED_TEXT,
+                parse_mode="HTML",
+                reply_markup=CLOSED_KEYBOARD
+            )
+        except Exception:
+            await update.callback_query.answer(
+                "⛔ Bot permanently closed by @ManagerHarsh", show_alert=True
+            )
+
+# ──────────────────────────────────────────────
+# HANDLERS — everything → closed message
+# ──────────────────────────────────────────────
+async def handle_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles /start, any command, any text — always shows closed."""
     user = update.effective_user
     if user:
-        save_user(user)
-    await update.message.reply_text(
-        CLOSED_TEXT,
-        parse_mode="HTML",
-        reply_markup=CLOSED_KEYBOARD
-    )
+        save_user(user)  # silently log visitor
 
-async def closed_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Answers any button press with closure message."""
+    # Let admins use /admin and /stats
+    if update.message and update.message.text:
+        cmd = update.message.text.split()[0].lower().lstrip("/")
+        if cmd in ("admin", "stats") and user.id in ADMIN_IDS:
+            return  # fall through to admin handlers below
+
+    await send_closed(update)
+
+async def handle_any_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles any inline button tap — always shows closed."""
     query = update.callback_query
     await query.answer("⛔ Bot permanently closed by @ManagerHarsh", show_alert=True)
     try:
@@ -162,11 +169,11 @@ async def closed_reply_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pass
 
 # ──────────────────────────────────────────────
-# ADMIN COMMANDS (still accessible for manager)
+# ADMIN COMMANDS (only for ADMIN_IDS)
 # ──────────────────────────────────────────────
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        await closed_reply_message(update, context)
+        await send_closed(update)
         return
     active_today, joined_today, total_preds, banned_count = get_today_stats()
     total = get_total_users()
@@ -178,12 +185,14 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  🆕 Joined Today: <b>{joined_today}</b>\n"
         f"  🎯 Total Predictions: <b>{total_preds}</b>\n"
         f"  🚫 Banned: <b>{banned_count}</b>\n\n"
-        f"<i>Bot is permanently CLOSED for all users.</i>",
-        parse_mode="HTML")
+        f"<i>⛔ Bot is permanently CLOSED for all users.</i>\n"
+        f"<i>Closed by @ManagerHarsh</i>",
+        parse_mode="HTML"
+    )
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        await closed_reply_message(update, context)
+        await send_closed(update)
         return
     active_today, joined_today, total_preds, banned_count = get_today_stats()
     total = get_total_users()
@@ -194,7 +203,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆕 Joined Today: <b>{joined_today}</b>\n"
         f"🎯 Total Predictions: <b>{total_preds}</b>\n"
         f"🚫 Banned: <b>{banned_count}</b>",
-        parse_mode="HTML")
+        parse_mode="HTML"
+    )
 
 # ──────────────────────────────────────────────
 # MAIN
@@ -203,27 +213,20 @@ def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Admin commands still work for manager
+    # Admin-only commands
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("stats", cmd_stats))
 
-    # ALL other commands → closed message
-    app.add_handler(CommandHandler("start",         closed_reply_message))
-    app.add_handler(CommandHandler("users",         closed_reply_message))
-    app.add_handler(CommandHandler("checkuser",     closed_reply_message))
-    app.add_handler(CommandHandler("addcredits",    closed_reply_message))
-    app.add_handler(CommandHandler("removecredits", closed_reply_message))
-    app.add_handler(CommandHandler("ban",           closed_reply_message))
-    app.add_handler(CommandHandler("unban",         closed_reply_message))
-    app.add_handler(CommandHandler("broadcast",     closed_reply_message))
+    # ALL other commands (including /start) → closed
+    app.add_handler(MessageHandler(filters.COMMAND, handle_any_message))
 
-    # All button clicks → closed
-    app.add_handler(CallbackQueryHandler(closed_reply_callback))
+    # ALL button taps → closed
+    app.add_handler(CallbackQueryHandler(handle_any_callback))
 
-    # All text messages → closed
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, closed_reply_message))
+    # ALL plain text messages → closed
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_any_message))
 
-    logger.info("🚫 Bot is running in CLOSED mode — permanently shut by @ManagerHarsh")
+    logger.info("⛔ Bot running in PERMANENTLY CLOSED mode — @ManagerHarsh")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
