@@ -10,7 +10,7 @@ from telegram.ext import (
 # ============================================================
 #  ⚙️  CONFIG
 # ============================================================
-BOT_TOKEN    = os.environ.get("BOT_TOKEN", "8846798377:AAEa4_4nVK14XmvmfOD0zd6UbSlRhzPKPS0")
+BOT_TOKEN    = os.environ.get("BOT_TOKEN", "8846798377:AAEZg4CZIOdzU52w37jYSuiE_---Yef0n6g")
 BOT_USERNAME = "predictor_prediction_bot"
 
 ADMIN_IDS = [6499436331]
